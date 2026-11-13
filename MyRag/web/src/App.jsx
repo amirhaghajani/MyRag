@@ -1,0 +1,92 @@
+import React, { useCallback, useEffect, useState } from "react";
+import { api } from "./api.js";
+import MachineCreate from "./components/MachineCreate.jsx";
+import MachineList from "./components/MachineList.jsx";
+import UploadPanel from "./components/UploadPanel.jsx";
+import WorkflowPicker from "./components/WorkflowPicker.jsx";
+import ChatPanel from "./components/ChatPanel.jsx";
+import UsagePanel from "./components/UsagePanel.jsx";
+
+export default function App() {
+  const [machines, setMachines] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [models, setModels] = useState(null);
+  const [workflows, setWorkflows] = useState([]);
+  const [workflowId, setWorkflowId] = useState(null);
+  const [error, setError] = useState("");
+
+  const loadMachines = useCallback(async () => {
+    try {
+      setMachines(await api.listMachines());
+    } catch (err) {
+      setError(err.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadMachines();
+    api.listModels().then(setModels).catch((e) => setError(e.message));
+    api
+      .listWorkflows()
+      .then((rows) => {
+        setWorkflows(rows);
+        if (rows.length) setWorkflowId(rows[0].id);
+      })
+      .catch((e) => setError(e.message));
+  }, [loadMachines]);
+
+  function refreshAll() {
+    loadMachines();
+  }
+
+  return (
+    <div className="layout">
+      <aside className="sidebar">
+        <h1>MyRag</h1>
+        {error && <div className="error" style={{ marginBottom: 10 }}>{error}</div>}
+        <MachineCreate models={models} onCreated={refreshAll} />
+        <h2>Machines</h2>
+        <MachineList
+          machines={machines}
+          selectedId={selected?.id}
+          onSelect={(m) => setSelected(m)}
+          onRefresh={refreshAll}
+        />
+      </aside>
+
+      <main className="main">
+        {!selected ? (
+          <p className="muted">Select a machine to upload data and start chatting.</p>
+        ) : (
+          <>
+            <h1 style={{ marginBottom: 4 }}>{selected.title}</h1>
+            <p className="cost">
+              embed model {selected.embed_model_id} · chunk {selected.chunk_size}/
+              {selected.chunk_overlap} · {selected.chunk_count} chunks
+            </p>
+
+            <UploadPanel machineId={selected.id} onChanged={refreshAll} />
+
+            <div className="card">
+              <WorkflowPicker
+                workflows={workflows}
+                value={workflowId}
+                onChange={setWorkflowId}
+              />
+            </div>
+
+            <ChatPanel
+              machineId={selected.id}
+              models={models}
+              workflows={workflows}
+              workflowId={workflowId}
+              onWorkflowChange={setWorkflowId}
+            />
+
+            <UsagePanel machineId={selected.id} />
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
