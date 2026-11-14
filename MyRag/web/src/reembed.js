@@ -3,10 +3,7 @@ import { api } from "./api.js";
 export function embedIsStale(machine, models) {
   if (!machine || !models) return false;
   const configured = models.embeddings || [];
-  return (
-    machine.embed_dim !== models.embed_dim ||
-    !configured.some((m) => m.id === machine.embed_model_id)
-  );
+  return !configured.some((m) => m.id === machine.embed_model_id);
 }
 
 export function staleError(err) {
@@ -26,8 +23,8 @@ export async function confirmReembed(machine, models) {
 
   const model = (models?.embeddings || []).find((m) => m.id === modelId);
   const question =
-    `This machine used "${machine.embed_model_id}" (dim ${machine.embed_dim}), which is ` +
-    `no longer configured. The server now expects dim ${models.embed_dim}.\n\n` +
+    `This machine used "${machine.embed_model_id}", which is no longer configured ` +
+    `on the server.\n\n` +
     `Re-embed all ${machine.chunk_count} chunks with ${modelId} (dim ${model?.dim ?? "?"})?\n\n` +
     "This calls the embedding API again and may cost money.";
 

@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     embed_api_key: str = ""
     embed_models: str = "openai/text-embedding-3-small=1536,0.02"
     default_embed_model: str = "openai/text-embedding-3-small"
+    # Legacy: machines carry their own dim from their embed model. Kept so existing
+    # .env files keep loading; no longer used to validate models.
     embed_dim: int = 1536
 
     chunk_size: int = 512
@@ -123,20 +125,6 @@ class Settings(BaseSettings):
     def embed_prices(self) -> dict[str, EmbedPrice]:
         return {m.model_id: m for m in parse_embed_models(self.embed_models)}
 
-    def validate_embed_dims(self) -> None:
-        """Every configured embed model must match EMBED_DIM (one vector column)."""
-        mismatches = [
-            f"{m.model_id} (dim={m.dim})"
-            for m in parse_embed_models(self.embed_models)
-            if m.dim != self.embed_dim
-        ]
-        if mismatches:
-            raise SettingsError(
-                f"EMBED_DIM={self.embed_dim} does not match configured embed model(s): "
-                f"{', '.join(mismatches)}. Every EMBED_MODELS entry must use "
-                f"dim={self.embed_dim} so the single chunks.vector column stays valid."
-            )
-
     def validate_models(self) -> None:
         if (self.auth_username == "") != (self.auth_password == ""):
             raise SettingsError(
@@ -156,7 +144,12 @@ class Settings(BaseSettings):
             raise SettingsError(
                 f"DEFAULT_EMBED_MODEL='{self.default_embed_model}' is not in EMBED_MODELS."
             )
-        self.validate_embed_dims()
+
+    @property
+    def default_embed_dim(self) -> int:
+        """Dimension of DEFAULT_EMBED_MODEL (informational; machines may use others)."""
+        price = self.embed_prices.get(self.default_embed_model)
+        return int(price.dim) if price is not None else 0
 
     @property
     def auth_enabled(self) -> bool:

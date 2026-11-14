@@ -55,14 +55,19 @@ def retrieve(
     question: str,
     top_k: int,
     embed_model_id: str,
+    embed_dim: int = 0,
 ) -> list[RetrievedChunk]:
-    """Dispatch to the right flow, passing the embed model only when it needs one."""
+    """Dispatch to the right flow, passing embed settings only when it needs them."""
     spec = spec_for(class_key)
     flow = build_flow(class_key)
 
     if spec.needs_embed_model:
         return flow.retrieve(  # type: ignore[call-arg]
-            machine_id=machine_id, question=question, top_k=top_k, embed_model_id=embed_model_id
+            machine_id=machine_id,
+            question=question,
+            top_k=top_k,
+            embed_model_id=embed_model_id,
+            embed_dim=embed_dim,
         )
     return flow.retrieve(machine_id=machine_id, question=question, top_k=top_k)  # type: ignore[call-arg]
 

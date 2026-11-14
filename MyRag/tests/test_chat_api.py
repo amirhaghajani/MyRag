@@ -1,4 +1,4 @@
-﻿"""End-to-end chat through the HTTP API with a stubbed LLM.
+"""End-to-end chat through the HTTP API with a stubbed LLM.
 
 Verifies the whole path: request -> workflow -> workflow row -> query row ->
 per-call usage -> cost -> response payload. No network or LLM calls are made.
@@ -39,7 +39,7 @@ def client(monkeypatch, tmp_path):
 
     monkeypatch.setattr(db, "_engine", engine, raising=False)
     monkeypatch.setattr(db, "_session_factory", None, raising=False)
-    monkeypatch.setattr(db, "create_schema", lambda dim: True, raising=False)
+    monkeypatch.setattr(db, "create_schema", lambda *args, **kwargs: True, raising=False)
 
     import app.ingest.pipeline as pipeline_mod
     import app.retrieval.embedding as embedding_mod
@@ -182,7 +182,8 @@ def test_chat_blocked_when_machine_embed_is_stale(client):
     workflow_id = _keyword_workflow_id(client)
     with db.get_engine().begin() as conn:
         conn.execute(
-            text("UPDATE machines SET embed_dim = 999 WHERE id = :id"), {"id": machine_id}
+            text("UPDATE machines SET embed_model_id = 'gone/model' WHERE id = :id"),
+            {"id": machine_id},
         )
 
     response = client.post(

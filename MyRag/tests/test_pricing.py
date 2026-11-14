@@ -122,15 +122,9 @@ def test_tokens_per_char_fallback_is_bounded(monkeypatch):
     assert pricing.estimate_embed_tokens(400) == 100  # chars / 4
 
 
-def test_embed_dim_mismatch_is_rejected():
-    settings = make_settings(
-        embed_models="openai/a=1536,0.02; openai/b=3072,0.13",
-        embed_dim=1536,
-    )
-    with pytest.raises(SettingsError) as exc:
-        settings.validate_embed_dims()
-    assert "openai/b" in str(exc.value)
-    assert "3072" in str(exc.value)
+def test_embed_models_can_use_different_dims():
+    settings = make_settings(embed_models="openai/a=1536,0.02; openai/b=3072,0.13")
+    assert {m.dim for m in settings.embed_prices.values()} == {1536, 3072}
 
 
 def test_validate_models_rejects_unknown_default_llm():

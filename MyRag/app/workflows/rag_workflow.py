@@ -103,6 +103,7 @@ class RagWorkflow(Workflow):
             question=question,
             top_k=int(ev.get("top_k", 4)),
             embed_model_id=ev.get("embed_model_id", ""),
+            embed_dim=int(ev.get("embed_dim", 0) or 0),
         )
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         logger.debug("retrieval returned %d chunks in %dms", len(chunks), elapsed_ms)

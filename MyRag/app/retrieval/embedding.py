@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
-from ..db import session_scope
+from ..db import session_scope, vector_column
 from ..ingest.embeddings import embed_texts
 from .base import RetrievedChunk, as_metadata_dict
 
@@ -17,26 +17,36 @@ class EmbeddingRetrievalFlow:
     )
 
     def retrieve(
-        self, *, machine_id: int, question: str, top_k: int, embed_model_id: str
+        self,
+        *,
+        machine_id: int,
+        question: str,
+        top_k: int,
+        embed_model_id: str,
+        embed_dim: int,
     ) -> list[RetrievedChunk]:
+        if int(embed_dim) <= 0:
+            return []
+
         vectors = embed_texts(embed_model_id, [question])
         if not vectors:
             return []
         embedding = vectors[0]
 
         vector_literal = "[" + ",".join(str(float(x)) for x in embedding) + "]"
+        column = vector_column(embed_dim)
 
         sql = text(
-            """
+            f"""
             SELECT c.id            AS chunk_id,
                    c.document_id   AS document_id,
                    c.text          AS text,
                    c.metadata      AS metadata,
-                   1 - (c.vector <=> CAST(:embedding AS vector)) AS score
+                   1 - (c.{column} <=> CAST(:embedding AS vector)) AS score
               FROM chunks c
              WHERE c.machine_id = :machine_id
-               AND c.vector IS NOT NULL
-             ORDER BY c.vector <=> CAST(:embedding AS vector)
+               AND c.{column} IS NOT NULL
+             ORDER BY c.{column} <=> CAST(:embedding AS vector)
              LIMIT :top_k
             """
         )

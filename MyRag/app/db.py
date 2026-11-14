@@ -72,38 +72,87 @@ def pgvector_available(conn) -> bool:
         return False
 
 
-def _column_type(dialect_name: str, embed_dim: int):
-    if dialect_name != "postgresql":
-        raise RuntimeError(
-            f"MyRag requires PostgreSQL with pgvector; got dialect '{dialect_name}'."
-        )
-    from pgvector.sqlalchemy import Vector
-
-    return Vector(embed_dim)
+def vector_column(dim: int) -> str:
+    """Name of the per-dimension vector column."""
+    dim = int(dim)
+    if dim <= 0:
+        raise ValueError("Embedding dimension must be positive.")
+    return f"vector_{dim}"
 
 
-def vector_dim(conn) -> int | None:
-    """Dimensions of the chunks.vector column, or None when the table is absent."""
-    row = conn.execute(
+def existing_vector_dims(conn) -> dict[int, str]:
+    """Map dimension -> column name for the vector_<dim> columns that exist."""
+    rows = conn.execute(
         text(
-            "SELECT a.atttypmod FROM pg_attribute a "
+            "SELECT a.attname, a.atttypmod FROM pg_attribute a "
             "JOIN pg_class c ON c.oid = a.attrelid "
+            "WHERE c.relname = 'chunks' AND a.attnum > 0 "
+            "AND a.attname LIKE 'vector\\_%' "
+            "AND format_type(a.atttypid, a.atttypmod) LIKE 'vector(%'"
+        )
+    ).mappings().all()
+    return {int(row["atttypmod"]): str(row["attname"]) for row in rows}
+
+
+def ensure_vector_column(conn, dim: int) -> str:
+    """Add the vector_<dim> column and its HNSW index when missing."""
+    column = vector_column(dim)
+    conn.execute(
+        text(f"ALTER TABLE chunks ADD COLUMN IF NOT EXISTS {column} vector({int(dim)})")
+    )
+    conn.execute(
+        text(
+            f"CREATE INDEX IF NOT EXISTS chunks_{column}_hnsw_idx "
+            f"ON chunks USING hnsw ({column} vector_cosine_ops)"
+        )
+    )
+    return column
+
+
+def configured_dims() -> list[int]:
+    from .config import get_settings
+
+    return sorted({int(price.dim) for price in get_settings().embed_prices.values()})
+
+
+def migrate_legacy_vectors(conn) -> int:
+    """Copy rows from the pre-multi-dim chunks.vector column into vector_<dim>.
+
+    Returns the number of rows migrated. The legacy column is left in place so the
+    migration can be rolled back by keeping the old code path.
+    """
+    has_legacy = conn.execute(
+        text(
+            "SELECT 1 FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "
             "WHERE c.relname = 'chunks' AND a.attname = 'vector' AND a.attnum > 0"
         )
     ).first()
-    return int(row[0]) if row is not None else None
+    if has_legacy is None:
+        return 0
+
+    dims = conn.execute(
+        text(
+            "SELECT DISTINCT embed_dim FROM chunks "
+            "WHERE vector IS NOT NULL AND embed_dim IS NOT NULL"
+        )
+    ).scalars().all()
+
+    moved = 0
+    for dim in dims:
+        column = ensure_vector_column(conn, int(dim))
+        result = conn.execute(
+            text(
+                f"UPDATE chunks SET {column} = vector "
+                f"WHERE embed_dim = :dim AND {column} IS NULL AND vector IS NOT NULL"
+            ),
+            {"dim": int(dim)},
+        )
+        moved += result.rowcount or 0
+    return moved
 
 
-def set_vector_dim(conn, embed_dim: int) -> None:
-    """Change the shared vector column. Callers must clear chunks first: the column
-    is a single fixed size and Postgres cannot cast a populated 1024-dim column to
-    4069 dims."""
-    conn.execute(text("DROP INDEX IF EXISTS chunks_vector_hnsw_idx"))
-    conn.execute(text(f"ALTER TABLE chunks ALTER COLUMN vector TYPE vector({int(embed_dim)})"))
-
-
-def create_schema(embed_dim: int) -> bool:
-    """Create tables, indexes and the pgvector column.
+def create_schema() -> bool:
+    """Create tables, per-dimension vector columns and indexes.
 
     Returns True when pgvector is usable. Raises RuntimeError on a non-Postgres URL.
     """
@@ -125,35 +174,35 @@ def create_schema(embed_dim: int) -> bool:
             "'CREATE EXTENSION vector' as a superuser) before starting MyRag."
         )
 
-    metadata = _build_metadata(_column_type(dialect, embed_dim))
+    metadata = _build_metadata()
     metadata.create_all(engine)
 
     with engine.begin() as conn:
-        conn.execute(
-            DDL(
-                "CREATE INDEX IF NOT EXISTS chunks_vector_hnsw_idx "
-                "ON chunks USING hnsw (vector vector_cosine_ops)"
-            )
-        )
         # Lightweight migrations for columns added after the first release.
         conn.execute(
             DDL("ALTER TABLE query ADD COLUMN IF NOT EXISTS reasoning TEXT")
         )
 
-        actual = vector_dim(conn)
-        if actual is not None and actual != embed_dim:
-            raise RuntimeError(
-                f"The database column chunks.vector is vector({actual}) but EMBED_DIM="
-                f"{embed_dim}. Changing the embedding dimension requires re-embedding "
-                "every document: stop the server and run "
-                "'python -m app.admin reembed --confirm' (add --embed-model MODEL to "
-                "switch models at the same time)."
-            )
+        dims = set(configured_dims())
+        try:
+            rows = conn.execute(text("SELECT embed_dim FROM machines")).all()
+            dims.update(int(row[0]) for row in rows if row[0] is not None)
+        except Exception:  # noqa: BLE001 - machines table may not exist yet
+            pass
+
+        for dim in sorted(dims):
+            ensure_vector_column(conn, dim)
+
+        migrate_legacy_vectors(conn)
     return vector_ok
 
 
-def _build_metadata(vector_type):
-    """Declarative metadata for every table (single source of truth for DDL)."""
+def _build_metadata():
+    """Declarative metadata for every table (single source of truth for DDL).
+
+    Vector columns are managed separately by ensure_vector_column(): one
+    vector_<dim> column per embedding dimension, so machines can use different models.
+    """
     from sqlalchemy import (
         BigInteger,
         Boolean,
@@ -215,7 +264,6 @@ def _build_metadata(vector_type):
         Column("metadata", JSONB, nullable=False, server_default=sql_text("'{}'::jsonb")),
         Column("embed_model_id", Text, nullable=True),
         Column("embed_dim", Integer, nullable=True),
-        Column("vector", vector_type, nullable=True),
         Column("token_estimate", Integer, nullable=False, server_default="0"),
         Column(
             "search_tsv",

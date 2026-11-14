@@ -93,9 +93,9 @@ export default function UploadPanel({ machine, models, onChanged, onMachineUpdat
       </div>
       {stale && (
         <div className="error" style={{ marginTop: 8 }}>
-          This machine still uses “{machine?.embed_model_id}” (dim {machine?.embed_dim}), which
-          the server no longer has. You will be asked to re-embed its documents with{" "}
-          {models?.default_embed_model} before uploading.
+          This machine still uses “{machine?.embed_model_id}”, which the server no longer
+          has. You will be asked to re-embed its documents with {models?.default_embed_model}{" "}
+          before uploading.
         </div>
       )}
       {error && <div className="error">{error}</div>}

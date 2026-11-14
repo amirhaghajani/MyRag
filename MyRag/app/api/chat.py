@@ -37,9 +37,8 @@ def _ensure_embed_ready(machine: dict) -> None:
     """
     settings = get_settings()
     model_id = machine["embed_model_id"]
-    embed_dim = int(machine["embed_dim"])
 
-    if embed_dim == settings.embed_dim and model_id in settings.embed_prices:
+    if model_id in settings.embed_prices:
         return
 
     raise HTTPException(
@@ -48,8 +47,6 @@ def _ensure_embed_ready(machine: dict) -> None:
             "code": "embed_model_stale",
             "machine_id": int(machine["id"]),
             "machine_embed_model_id": model_id,
-            "machine_embed_dim": embed_dim,
-            "server_embed_dim": settings.embed_dim,
             "suggested_embed_model": settings.default_embed_model,
         },
     )
@@ -96,6 +93,7 @@ async def chat(machine_id: int, payload: ChatRequest) -> ChatResponse:
             llm_model_id=payload.llm_model_id,
             question=question,
             top_k=top_k,
+            embed_dim=int(machine["embed_dim"] or 0),
         )
     except QueryError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -152,6 +150,7 @@ async def chat_stream(machine_id: int, payload: ChatRequest) -> StreamingRespons
                 llm_model_id=payload.llm_model_id,
                 question=question,
                 top_k=top_k,
+                embed_dim=int(machine["embed_dim"] or 0),
             ):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as exc:

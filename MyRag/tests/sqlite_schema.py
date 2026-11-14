@@ -44,6 +44,7 @@ TABLES = [
         embed_model_id TEXT,
         embed_dim INTEGER,
         vector TEXT,
+        vector_8 TEXT,
         token_estimate INTEGER DEFAULT 0
     )
     """,

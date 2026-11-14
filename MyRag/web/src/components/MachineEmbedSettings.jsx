@@ -14,10 +14,8 @@ export default function MachineEmbedSettings({ machine, models, onChanged }) {
     setModelId(exists ? machine.embed_model_id : "");
   }, [machine.id, machine.embed_model_id, models]);
 
-  const mismatch = serverDim != null && machine.embed_dim !== serverDim;
-  const modelMissing = !configured.some((m) => m.id === machine.embed_model_id);
-  const selected = configured.find((m) => m.id === modelId);
-  const selectionMatches = !selected || selected.dim === serverDim;
+const modelMissing = !configured.some((m) => m.id === machine.embed_model_id);
+  const current = configured.find((m) => m.id === machine.embed_model_id);
 
   async function apply() {
     if (!modelId || modelId === machine.embed_model_id || !selectionMatches) return;
@@ -43,19 +41,11 @@ export default function MachineEmbedSettings({ machine, models, onChanged }) {
     <div className="card">
       <h2>Embedding</h2>
       <p className="cost">
-        Server EMBED_DIM {serverDim ?? "?"} · {machine.embed_model_id} (dim{" "}
-        {machine.embed_dim}) · {machine.chunk_count} chunks
+        {machine.embed_model_id} (dim {machine.embed_dim}) · {machine.chunk_count} chunks ·
+        server default {models?.default_embed_model} (dim {serverDim ?? "?"})
       </p>
 
-      {mismatch && (
-        <div className="error" style={{ marginBottom: 8 }}>
-          This machine uses dim {machine.embed_dim} but the server is configured for dim{" "}
-          {serverDim}. Uploads and chat are blocked until you pick a {serverDim}-dim model and
-          re-embed its documents.
-        </div>
-      )}
-
-      {modelMissing && !mismatch && (
+      {modelMissing && (
         <div className="error" style={{ marginBottom: 8 }}>
           The embed model “{machine.embed_model_id}” is no longer configured on the server.
           Pick one below and re-embed this machine's documents.
@@ -78,8 +68,7 @@ export default function MachineEmbedSettings({ machine, models, onChanged }) {
           disabled={
             busy ||
             !modelId ||
-            modelId === machine.embed_model_id ||
-            !selectionMatches
+            modelId === machine.embed_model_id
           }
         >
           {busy
@@ -90,10 +79,10 @@ export default function MachineEmbedSettings({ machine, models, onChanged }) {
         </button>
       </div>
 
-      {selected && selected.dim !== serverDim && (
+      {selected && selected.dim !== current?.dim && current && (
         <p className="cost" style={{ marginTop: 6 }}>
-          This model's dim ({selected.dim}) does not match the server ({serverDim}). Change
-          EMBED_DIM in .env and run the re-embed command first.
+          Switching to dim {selected.dim} re-embeds this machine's chunks into a different
+          vector column; other machines keep theirs.
         </p>
       )}
       {error && <div className="error" style={{ marginTop: 6 }}>{error}</div>}

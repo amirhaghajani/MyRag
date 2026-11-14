@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
     install_usage_handler()
 
     try:
-        create_schema(settings.embed_dim)
+        create_schema()
     except Exception as exc:
         # A database problem is the most common startup failure; say so plainly.
         logger.error(
@@ -78,7 +78,8 @@ async def lifespan(app: FastAPI):
         raise
 
     seed_workflows()
-    logger.info("MyRag ready. embed_dim=%d", settings.embed_dim)
+    logger.info("MyRag ready. default embed model %s (dim=%d)",
+                settings.default_embed_model, settings.default_embed_dim)
     yield
 
 

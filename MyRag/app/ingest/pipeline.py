@@ -8,7 +8,7 @@ from pathlib import Path
 
 from sqlalchemy import text
 
-from ..db import session_scope
+from ..db import session_scope, vector_column
 from ..llm import pricing
 from ..retrieval.keyword import invalidate as invalidate_bm25
 from .embeddings import embed_texts
@@ -208,11 +208,12 @@ def _insert_chunks(
             }
         )
 
+    column = vector_column(embed_dim)
     sql = text(
-        """
+        f"""
         INSERT INTO chunks
             (machine_id, document_id, chunk_index, text, metadata,
-             embed_model_id, embed_dim, vector, token_estimate)
+             embed_model_id, embed_dim, {column}, token_estimate)
         VALUES
             (:machine_id, :document_id, :chunk_index, :text, CAST(:metadata AS jsonb),
              :embed_model_id, :embed_dim, CAST(:vector AS vector), :token_estimate)

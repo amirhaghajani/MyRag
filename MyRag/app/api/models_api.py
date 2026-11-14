@@ -39,5 +39,5 @@ def list_models() -> ModelsOut:
         embed_api_base=settings.embed_api_base_effective,
         default_llm_model=settings.default_llm_model,
         default_embed_model=settings.default_embed_model,
-        embed_dim=settings.embed_dim,
+        embed_dim=settings.default_embed_dim,
     )

@@ -32,10 +32,20 @@ class HybridRetrievalFlow:
     )
 
     def retrieve(
-        self, *, machine_id: int, question: str, top_k: int, embed_model_id: str
+        self,
+        *,
+        machine_id: int,
+        question: str,
+        top_k: int,
+        embed_model_id: str,
+        embed_dim: int,
     ) -> list[RetrievedChunk]:
         dense = EmbeddingRetrievalFlow().retrieve(
-            machine_id=machine_id, question=question, top_k=top_k, embed_model_id=embed_model_id
+            machine_id=machine_id,
+            question=question,
+            top_k=top_k,
+            embed_model_id=embed_model_id,
+            embed_dim=embed_dim,
         )
         sparse = self._sparse(machine_id=machine_id, question=question, top_k=top_k)
         return reciprocal_rank_fusion([dense, sparse], top_k=top_k)

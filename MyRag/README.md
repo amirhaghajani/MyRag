@@ -147,47 +147,44 @@ Uvicorn workers are not supported on Windows, so run a single process. If you ne
 put IIS (with the URL Rewrite + ARR modules) or nginx for Windows in front and forward to several
 Uvicorn instances on different ports.
 
-## Change the embedding model or dimension
+## Embedding models and dimensions
 
-`chunks.vector` is one fixed-size column shared by every machine. A machine can switch models as
-long as the new model has the same dimension as `EMBED_DIM`.
+`EMBED_MODELS` can contain models with different dimensions. Each machine stores its vectors in a
+per-dimension column (`chunks.vector_1024`, `chunks.vector_4069`, ...), created automatically on
+startup. Machines can therefore run different embedders side by side; changing one machine's model
+never touches another machine's vectors.
 
-**Switch model, same dimension (from the UI):** each machine has an **Embedding** card with the
-configured models and their dimensions. Picking one and confirming re-embeds that machine's
-documents; the API rejects an unconfirmed change with `409` when chunks already exist.
+**Switch a machine's model (UI):** the **Embedding** card lists every configured model with its
+dimension. Picking one and confirming re-embeds that machine only; the API returns `409` when chunks
+already exist and `reembed` is not confirmed.
 
-**Change `EMBED_DIM` (or use a model with a different dimension):** this needs a full re-embed of
-every machine. With the server stopped:
-
-1. Edit `.env` — `EMBED_DIM` and `EMBED_MODELS` (every entry must match the new dim).
-2. Preview the change, then run it:
+**Switch from the CLI** (one machine, or all machines):
 
 ```powershell
-.venv\Scripts\python.exe -m app.admin reembed
-.venv\Scripts\python.exe -m app.admin reembed --confirm --embed-model nvidia/nemotron-3.5-embed-8b:free
+.venv\Scripts\python.exe -m app.admin reembed --machine 2 --embed-model nvidia/nemotron-3.5-embed-8b:free
+.venv\Scripts\python.exe -m app.admin reembed --machine 2 --embed-model nvidia/nemotron-3.5-embed-8b:free --confirm
+.venv\Scripts\python.exe -m app.admin reembed --confirm            # re-embed every machine with its own model
 ```
 
-The command deletes all chunks, alters `chunks.vector`, points every machine at the new model,
-and re-embeds every document from its stored file. `--embed-model` is required when a machine still
-uses a model whose dimension differs from the new `EMBED_DIM`.
+The first form previews; `--confirm` deletes that machine's chunks, switches the model/dimension,
+and re-indexes its documents from the stored files.
 
-The app refuses to start when the database column and `EMBED_DIM` disagree, and uploads/indexing are
-blocked for a machine whose `embed_dim` no longer matches the server — the UI shows the mismatch and
-offers the re-embed action.
+**Legacy `EMBED_DIM`** is ignored; machines take their dimension from their model. The old single
+`chunks.vector` column is left in place and unused, so existing rows are harmless.
 
 ### When a machine's embed model disappears
 
-If a machine was created with a model that is no longer in `EMBED_MODELS` (or its dimension changed),
-the UI detects it: uploading a document or asking a question first asks
+If a machine was created with a model that is no longer in `EMBED_MODELS`, the UI detects it: uploading
+a document or asking a question first asks
 
-> This machine used "old/model" (dim 1024), which is no longer configured. The server now expects
-> dim 4069. Re-embed all N chunks with <default model>?
+> This machine used "old/model", which is no longer configured on the server. Re-embed all N chunks
+> with <default model>?
 
 Confirming calls `PATCH /api/machines/{id}` with `reembed: true`, which switches the machine to
-`DEFAULT_EMBED_MODEL` and re-indexes its documents from the stored files. The API also rejects chat
-and upload for such a machine with `409 {"detail": {"code": "embed_model_stale", ...}}` if called
-directly. Cancelling leaves the machine untouched; it stays read-only for new documents until fixed
-in the **Embedding** card.
+`DEFAULT_EMBED_MODEL` and re-indexes its documents. The API also rejects chat and upload for such a
+machine with `409 {"detail": {"code": "embed_model_stale", ...}}` if called directly. Cancelling
+leaves the machine untouched; it stays read-only for new documents until fixed in the **Embedding**
+card.
 
 ## Put nginx for Windows in front of Uvicorn (recommended)
 

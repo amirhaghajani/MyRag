@@ -51,28 +51,21 @@ def _to_out(row) -> DocumentOut:
 
 
 def _ensure_embed_compatible(machine) -> None:
-    """Block uploads/indexing when the machine's embed model is out of date."""
+    """Block uploads/indexing when the machine's embed model is no longer configured."""
     settings = get_settings()
-    embed_dim = int(machine["embed_dim"])
     model_id = machine["embed_model_id"]
 
-    if embed_dim != settings.embed_dim:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"This machine embeds with dim {embed_dim}, but the server is configured "
-                f"for dim {settings.embed_dim}. Pick a matching embed model in machine "
-                "settings and re-embed its documents before uploading more."
-            ),
-        )
     if model_id not in settings.embed_prices:
         known = ", ".join(sorted(settings.embed_prices))
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"Embed model '{model_id}' is no longer configured. Configured: {known}. "
-                "Change the machine's embed model and re-embed its documents."
-            ),
+            detail={
+                "code": "embed_model_stale",
+                "machine_id": int(machine["id"]),
+                "machine_embed_model_id": model_id,
+                "suggested_embed_model": settings.default_embed_model,
+                "configured": known,
+            },
         )
 
 

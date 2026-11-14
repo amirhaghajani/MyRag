@@ -54,14 +54,6 @@ def create_machine(payload: MachineCreate) -> MachineOut:
             status_code=422,
             detail=f"Unknown embed model '{embed_model_id}'. Configured: {known}",
         )
-    if embed_price.dim != settings.embed_dim:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Embed model '{embed_model_id}' has dim {embed_price.dim} but EMBED_DIM is "
-                f"{settings.embed_dim}. All configured embed models must match EMBED_DIM."
-            ),
-        )
 
     chunk_size = payload.chunk_size or settings.chunk_size
     chunk_overlap = (
@@ -86,7 +78,7 @@ def create_machine(payload: MachineCreate) -> MachineOut:
             {
                 "title": payload.title.strip(),
                 "embed_model_id": embed_model_id,
-                "embed_dim": settings.embed_dim,
+                "embed_dim": embed_price.dim,
                 "chunk_size": chunk_size,
                 "chunk_overlap": chunk_overlap,
             },
@@ -157,16 +149,6 @@ def update_machine(
                 status_code=422,
                 detail=f"Unknown embed model '{model_id}'. Configured: {known}",
             )
-        if price.dim != settings.embed_dim:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Embed model '{model_id}' has dim {price.dim} but EMBED_DIM is "
-                    f"{settings.embed_dim}. A dimension change needs a full re-embed: run "
-                    "'python -m app.admin reembed --confirm --embed-model "
-                    f"{model_id}' with the server stopped."
-                ),
-            )
 
     with session_scope() as session:
         row = session.execute(
@@ -208,7 +190,7 @@ def update_machine(
                     "UPDATE machines SET embed_model_id = :model, embed_dim = :dim "
                     "WHERE id = :id"
                 ),
-                {"model": model_id, "dim": settings.embed_dim, "id": machine_id},
+                {"model": model_id, "dim": price.dim, "id": machine_id},
             )
 
     if payload.reembed:

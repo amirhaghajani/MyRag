@@ -1,4 +1,4 @@
-﻿"""End-to-end API smoke test against SQLite.
+"""End-to-end API smoke test against SQLite.
 
 Exercises the real HTTP surface (machines, documents, workflows, models) without
 requiring PostgreSQL. Vector search is skipped because SQLite has no pgvector.
@@ -41,7 +41,7 @@ def client(monkeypatch, tmp_path):
 
     monkeypatch.setattr(db, "_engine", engine, raising=False)
     monkeypatch.setattr(db, "_session_factory", None, raising=False)
-    monkeypatch.setattr(db, "create_schema", lambda dim: True, raising=False)
+    monkeypatch.setattr(db, "create_schema", lambda *args, **kwargs: True, raising=False)
 
     # Stub embeddings so ingestion needs no network. Patch the source module so
     # the pipeline's already-imported reference sees the stub too.
@@ -193,18 +193,19 @@ def test_usage_for_missing_machine_returns_404(client):
     assert client.get("/api/machines/999/usage").status_code == 404
 
 
-def test_upload_blocked_when_machine_dim_is_stale(client):
+def test_upload_blocked_when_machine_embed_model_is_stale(client):
     machine_id = client.post("/api/machines", json={"title": "Mill"}).json()["id"]
     with db.get_engine().begin() as conn:
         conn.execute(
-            text("UPDATE machines SET embed_dim = 999 WHERE id = :id"), {"id": machine_id}
+            text("UPDATE machines SET embed_model_id = 'gone/model' WHERE id = :id"),
+            {"id": machine_id},
         )
 
     files = {"file": ("a.txt", io.BytesIO(b"hello world"), "text/plain")}
     response = client.post(f"/api/machines/{machine_id}/documents", files=files)
 
     assert response.status_code == 409
-    assert "dim" in response.json()["detail"]
+    assert response.json()["detail"]["code"] == "embed_model_stale"
 
 
 def test_machine_embed_change_requires_confirmation(client):

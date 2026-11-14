@@ -110,9 +110,6 @@ export default function App() {
             <p className="cost">
               embed model {selected.embed_model_id} · dim {selected.embed_dim} · chunk{" "}
               {selected.chunk_size}/{selected.chunk_overlap} · {selected.chunk_count} chunks
-              {models && selected.embed_dim !== models.embed_dim && (
-                <span className="error"> · server dim is {models.embed_dim}</span>
-              )}
             </p>
 
             {models && (

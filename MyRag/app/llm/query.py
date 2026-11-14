@@ -194,6 +194,7 @@ async def run_query(
     llm_model_id: str,
     question: str,
     top_k: int,
+    embed_dim: int = 0,
 ) -> QueryOutcome:
     """Run one question through the selected workflow and persist its cost."""
     started = time.perf_counter()
@@ -216,6 +217,7 @@ async def run_query(
             embed_model_id=embed_model_id,
             llm_model_id=llm_model_id,
             top_k=top_k,
+            embed_dim=embed_dim,
         )
 
         answer = result.get("answer", "") if isinstance(result, dict) else str(result)
@@ -259,6 +261,7 @@ async def stream_query(
     llm_model_id: str,
     question: str,
     top_k: int,
+    embed_dim: int = 0,
 ) -> AsyncIterator[dict]:
     """Run one question and yield SSE-style events while the answer streams.
 
@@ -287,6 +290,7 @@ async def stream_query(
             question=question,
             top_k=top_k,
             embed_model_id=embed_model_id,
+            embed_dim=embed_dim,
         )
         retrieval_ms = int((time.perf_counter() - retrieval_started) * 1000)
         record_retrieval(chunks)
