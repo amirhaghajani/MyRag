@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from pathlib import Path
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from sqlalchemy import text
 
 from ..config import get_settings
 from ..db import session_scope
 from ..deps import MachineNotFound, fetch_machine
-from ..schemas import MachineCreate, MachineOut, MachineSummary
+from ..schemas import MachineCreate, MachineOut, MachineSummary, MachineUpdate
 
 router = APIRouter(prefix="/api/machines", tags=["machines"])
 
-_SUMMARY_SQL = text(
-    """
+_SUMMARY_SQL_TEXT = """
     SELECT m.*,
            (SELECT count(*) FROM documents d WHERE d.machine_id = m.id) AS document_count,
            (SELECT count(*) FROM chunks c WHERE c.machine_id = m.id) AS chunk_count,
@@ -24,7 +25,9 @@ _SUMMARY_SQL = text(
            AS total_cost_usd
       FROM machines m
     """
-)
+
+_SUMMARY_SQL = text(_SUMMARY_SQL_TEXT)
+_SUMMARY_BY_ID_SQL = text(_SUMMARY_SQL_TEXT + " WHERE m.id = :id")
 
 
 def _row_to_out(row) -> MachineOut:
@@ -117,10 +120,111 @@ def list_machines() -> list[MachineSummary]:
 def get_machine(machine_id: int) -> MachineSummary:
     with session_scope() as session:
         row = session.execute(
-            _SUMMARY_SQL + " WHERE m.id = :id", {"id": machine_id}
+            _SUMMARY_BY_ID_SQL, {"id": machine_id}
         ).mappings().first()
     if row is None:
         raise HTTPException(status_code=404, detail=f"Machine {machine_id} not found")
+
+    return MachineSummary(
+        **_row_to_out(row).model_dump(),
+        document_count=int(row["document_count"] or 0),
+        chunk_count=int(row["chunk_count"] or 0),
+        query_count=int(row["query_count"] or 0),
+        total_cost_usd=float(row["total_cost_usd"] or 0),
+    )
+
+
+@router.patch("/{machine_id}", response_model=MachineSummary, status_code=202)
+def update_machine(
+    machine_id: int, payload: MachineUpdate, background_tasks: BackgroundTasks
+) -> MachineSummary:
+    """Switch a machine to another embed model.
+
+    Re-embedding is required whenever the machine already has chunks: the stored
+    vectors were produced by the old model. The client must confirm that intent with
+    ``reembed: true``.
+    """
+    from ..ingest.pipeline import index_document
+
+    settings = get_settings()
+    model_id = payload.embed_model_id
+
+    if model_id is not None:
+        price = settings.embed_prices.get(model_id)
+        if price is None:
+            known = ", ".join(sorted(settings.embed_prices))
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown embed model '{model_id}'. Configured: {known}",
+            )
+        if price.dim != settings.embed_dim:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Embed model '{model_id}' has dim {price.dim} but EMBED_DIM is "
+                    f"{settings.embed_dim}. A dimension change needs a full re-embed: run "
+                    "'python -m app.admin reembed --confirm --embed-model "
+                    f"{model_id}' with the server stopped."
+                ),
+            )
+
+    with session_scope() as session:
+        row = session.execute(
+            text(
+                "SELECT id, embed_model_id, embed_dim FROM machines WHERE id = :id"
+            ),
+            {"id": machine_id},
+        ).mappings().first()
+        if row is None:
+            raise MachineNotFound(machine_id)
+
+        documents = session.execute(
+            text(
+                "SELECT id, stored_path FROM documents WHERE machine_id = :id ORDER BY id"
+            ),
+            {"id": machine_id},
+        ).mappings().all()
+
+        chunk_count = int(
+            session.execute(
+                text("SELECT count(*) FROM chunks WHERE machine_id = :id"),
+                {"id": machine_id},
+            ).scalar_one()
+        )
+
+        if chunk_count > 0 and not payload.reembed:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Machine {machine_id} has {chunk_count} chunks. Changing the embed "
+                    "model re-embeds them (embedding API cost). Resend with "
+                    '"reembed": true to confirm.'
+                ),
+            )
+
+        if model_id is not None:
+            session.execute(
+                text(
+                    "UPDATE machines SET embed_model_id = :model, embed_dim = :dim "
+                    "WHERE id = :id"
+                ),
+                {"model": model_id, "dim": settings.embed_dim, "id": machine_id},
+            )
+
+    if payload.reembed:
+        for document in documents:
+            stored = document["stored_path"]
+            if stored and Path(stored).exists():
+                background_tasks.add_task(index_document, int(document["id"]), Path(stored))
+            else:
+                from ..ingest.pipeline import set_status
+
+                set_status(int(document["id"]), "failed", "Stored file missing; re-upload.")
+
+    with session_scope() as session:
+        row = session.execute(
+            _SUMMARY_BY_ID_SQL, {"id": machine_id}
+        ).mappings().one()
 
     return MachineSummary(
         **_row_to_out(row).model_dump(),

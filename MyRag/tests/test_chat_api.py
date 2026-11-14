@@ -66,6 +66,7 @@ def client(monkeypatch, tmp_path):
     for module_name in (
         "app.api.models_api",
         "app.api.machines",
+        "app.api.documents",
         "app.api.chat",
         "app.ingest.reader",
         "app.llm.pricing",
@@ -174,6 +175,27 @@ def test_query_log_returns_retrieval_and_prompt(client):
 
 def test_query_log_missing_query_returns_404(client):
     assert client.get("/api/queries/999999/log").status_code == 404
+
+
+def test_chat_blocked_when_machine_embed_is_stale(client):
+    machine_id, _ = _make_machine_with_doc(client)
+    workflow_id = _keyword_workflow_id(client)
+    with db.get_engine().begin() as conn:
+        conn.execute(
+            text("UPDATE machines SET embed_dim = 999 WHERE id = :id"), {"id": machine_id}
+        )
+
+    response = client.post(
+        f"/api/machines/{machine_id}/chat",
+        json={
+            "question": "Rated capacity?",
+            "workflow_id": workflow_id,
+            "llm_model_id": "test/model",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "embed_model_stale"
 
 
 def test_chat_persists_query_and_records_version(client):

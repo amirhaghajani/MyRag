@@ -29,6 +29,32 @@ def _machine_embed(machine: dict) -> str:
     return machine["embed_model_id"]
 
 
+def _ensure_embed_ready(machine: dict) -> None:
+    """A machine whose embed model/dim no longer matches the server cannot answer.
+
+    The client is expected to offer a re-embed and retry; this guard makes the API safe
+    even when called directly.
+    """
+    settings = get_settings()
+    model_id = machine["embed_model_id"]
+    embed_dim = int(machine["embed_dim"])
+
+    if embed_dim == settings.embed_dim and model_id in settings.embed_prices:
+        return
+
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "embed_model_stale",
+            "machine_id": int(machine["id"]),
+            "machine_embed_model_id": model_id,
+            "machine_embed_dim": embed_dim,
+            "server_embed_dim": settings.embed_dim,
+            "suggested_embed_model": settings.default_embed_model,
+        },
+    )
+
+
 def _guard_chat(machine_id: int, payload: ChatRequest):
     try:
         machine = machine_guard(machine_id)
@@ -39,6 +65,8 @@ def _guard_chat(machine_id: int, payload: ChatRequest):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    _ensure_embed_ready(machine)
 
     settings = get_settings()
     if payload.llm_model_id not in settings.llm_prices:

@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api.js";
+import { confirmReembed, embedIsStale, staleError } from "../reembed.js";
 
 export default function ChatPanel({
   machineId,
+  machine,
   models,
   workflows,
   workflowId,
   onWorkflowChange,
+  onMachineUpdated,
 }) {
   const [llmModelId, setLlmModelId] = useState("");
   const [question, setQuestion] = useState("");
@@ -32,6 +35,33 @@ export default function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineId]);
 
+  async function streamAnswer(asked) {
+    await api.chatStream(
+      machineId,
+      {
+        question: asked,
+        workflow_id: workflowId,
+        llm_model_id: llmModelId,
+      },
+      (event) => {
+        if (event.type === "status") {
+          setStream((prev) => (prev ? { ...prev, stage: event.stage } : prev));
+        } else if (event.type === "token") {
+          setStream((prev) =>
+            prev ? { ...prev, stage: "answering", answer: prev.answer + event.text } : prev
+          );
+        } else if (event.type === "reasoning") {
+          setStream((prev) =>
+            prev ? { ...prev, reasoning: prev.reasoning + event.text } : prev
+          );
+        }
+      }
+    );
+    setQuestion("");
+    await refresh();
+    setStream(null);
+  }
+
   async function ask(event) {
     event.preventDefault();
     if (!question.trim() || !machineId) return;
@@ -41,30 +71,26 @@ export default function ChatPanel({
     const asked = question.trim();
     setStream({ question: asked, answer: "", reasoning: "", stage: "retrieving" });
     try {
-      await api.chatStream(
-        machineId,
-        {
-          question: asked,
-          workflow_id: workflowId,
-          llm_model_id: llmModelId,
-        },
-        (event) => {
-          if (event.type === "status") {
-            setStream((prev) => (prev ? { ...prev, stage: event.stage } : prev));
-          } else if (event.type === "token") {
-            setStream((prev) =>
-              prev ? { ...prev, stage: "answering", answer: prev.answer + event.text } : prev
-            );
-          } else if (event.type === "reasoning") {
-            setStream((prev) =>
-              prev ? { ...prev, reasoning: prev.reasoning + event.text } : prev
-            );
-          }
+      if (embedIsStale(machine, models)) {
+        const updated = await confirmReembed(machine, models);
+        if (!updated) {
+          setStream(null);
+          return;
         }
-      );
-      setQuestion("");
-      await refresh();
-      setStream(null);
+        onMachineUpdated?.(updated);
+      }
+      try {
+        await streamAnswer(asked);
+      } catch (err) {
+        if (!staleError(err)) throw err;
+        const updated = await confirmReembed(machine, models);
+        if (!updated) {
+          setStream(null);
+          return;
+        }
+        onMachineUpdated?.(updated);
+        await streamAnswer(asked);
+      }
     } catch (err) {
       setError(err.message);
       setStream(null);

@@ -14,6 +14,11 @@ class MachineCreate(BaseModel):
     chunk_overlap: int | None = Field(default=None, ge=0, le=1024)
 
 
+class MachineUpdate(BaseModel):
+    embed_model_id: str | None = None
+    reembed: bool = False
+
+
 class MachineOut(BaseModel):
     id: int
     title: str

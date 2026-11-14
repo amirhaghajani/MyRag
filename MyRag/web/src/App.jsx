@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
 import Login from "./components/Login.jsx";
 import MachineCreate from "./components/MachineCreate.jsx";
+import MachineEmbedSettings from "./components/MachineEmbedSettings.jsx";
 import MachineList from "./components/MachineList.jsx";
 import UploadPanel from "./components/UploadPanel.jsx";
 import WorkflowPicker from "./components/WorkflowPicker.jsx";
@@ -107,11 +108,27 @@ export default function App() {
           <>
             <h1 style={{ marginBottom: 4 }}>{selected.title}</h1>
             <p className="cost">
-              embed model {selected.embed_model_id} · chunk {selected.chunk_size}/
-              {selected.chunk_overlap} · {selected.chunk_count} chunks
+              embed model {selected.embed_model_id} · dim {selected.embed_dim} · chunk{" "}
+              {selected.chunk_size}/{selected.chunk_overlap} · {selected.chunk_count} chunks
+              {models && selected.embed_dim !== models.embed_dim && (
+                <span className="error"> · server dim is {models.embed_dim}</span>
+              )}
             </p>
 
-            <UploadPanel machineId={selected.id} onChanged={refreshAll} />
+            {models && (
+              <MachineEmbedSettings
+                machine={selected}
+                models={models}
+                onChanged={loadMachines}
+              />
+            )}
+
+            <UploadPanel
+              machine={selected}
+              models={models}
+              onChanged={refreshAll}
+              onMachineUpdated={setSelected}
+            />
 
             <div className="card">
               <WorkflowPicker
@@ -123,10 +140,12 @@ export default function App() {
 
             <ChatPanel
               machineId={selected.id}
+              machine={selected}
               models={models}
               workflows={workflows}
               workflowId={workflowId}
               onWorkflowChange={setWorkflowId}
+              onMachineUpdated={setSelected}
             />
 
             <UsagePanel machineId={selected.id} />

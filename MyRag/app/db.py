@@ -82,6 +82,26 @@ def _column_type(dialect_name: str, embed_dim: int):
     return Vector(embed_dim)
 
 
+def vector_dim(conn) -> int | None:
+    """Dimensions of the chunks.vector column, or None when the table is absent."""
+    row = conn.execute(
+        text(
+            "SELECT a.atttypmod FROM pg_attribute a "
+            "JOIN pg_class c ON c.oid = a.attrelid "
+            "WHERE c.relname = 'chunks' AND a.attname = 'vector' AND a.attnum > 0"
+        )
+    ).first()
+    return int(row[0]) if row is not None else None
+
+
+def set_vector_dim(conn, embed_dim: int) -> None:
+    """Change the shared vector column. Callers must clear chunks first: the column
+    is a single fixed size and Postgres cannot cast a populated 1024-dim column to
+    4069 dims."""
+    conn.execute(text("DROP INDEX IF EXISTS chunks_vector_hnsw_idx"))
+    conn.execute(text(f"ALTER TABLE chunks ALTER COLUMN vector TYPE vector({int(embed_dim)})"))
+
+
 def create_schema(embed_dim: int) -> bool:
     """Create tables, indexes and the pgvector column.
 
@@ -119,6 +139,16 @@ def create_schema(embed_dim: int) -> bool:
         conn.execute(
             DDL("ALTER TABLE query ADD COLUMN IF NOT EXISTS reasoning TEXT")
         )
+
+        actual = vector_dim(conn)
+        if actual is not None and actual != embed_dim:
+            raise RuntimeError(
+                f"The database column chunks.vector is vector({actual}) but EMBED_DIM="
+                f"{embed_dim}. Changing the embedding dimension requires re-embedding "
+                "every document: stop the server and run "
+                "'python -m app.admin reembed --confirm' (add --embed-model MODEL to "
+                "switch models at the same time)."
+            )
     return vector_ok
 
 

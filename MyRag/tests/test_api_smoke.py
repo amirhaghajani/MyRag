@@ -76,6 +76,7 @@ def client(monkeypatch, tmp_path):
     modules = (
         "app.api.models_api",
         "app.api.machines",
+        "app.api.documents",
         "app.api.chat",
         "app.ingest.reader",
         "app.llm.pricing",
@@ -190,6 +191,45 @@ def test_usage_is_empty_before_chat(client):
 
 def test_usage_for_missing_machine_returns_404(client):
     assert client.get("/api/machines/999/usage").status_code == 404
+
+
+def test_upload_blocked_when_machine_dim_is_stale(client):
+    machine_id = client.post("/api/machines", json={"title": "Mill"}).json()["id"]
+    with db.get_engine().begin() as conn:
+        conn.execute(
+            text("UPDATE machines SET embed_dim = 999 WHERE id = :id"), {"id": machine_id}
+        )
+
+    files = {"file": ("a.txt", io.BytesIO(b"hello world"), "text/plain")}
+    response = client.post(f"/api/machines/{machine_id}/documents", files=files)
+
+    assert response.status_code == 409
+    assert "dim" in response.json()["detail"]
+
+
+def test_machine_embed_change_requires_confirmation(client):
+    machine_id = client.post("/api/machines", json={"title": "Mill"}).json()["id"]
+    files = {"file": ("a.txt", io.BytesIO(b"hello world"), "text/plain")}
+    doc_id = client.post(f"/api/machines/{machine_id}/documents", files=files).json()["id"]
+    client.post(f"/api/documents/{doc_id}/index")
+
+    without_confirm = client.patch(
+        f"/api/machines/{machine_id}", json={"embed_model_id": "test/embed"}
+    )
+    assert without_confirm.status_code == 409
+    assert "re-embed" in without_confirm.json()["detail"]
+
+    unknown = client.patch(
+        f"/api/machines/{machine_id}", json={"embed_model_id": "nope/model", "reembed": True}
+    )
+    assert unknown.status_code == 422
+
+    confirmed = client.patch(
+        f"/api/machines/{machine_id}",
+        json={"embed_model_id": "test/embed", "reembed": True},
+    )
+    assert confirmed.status_code == 202
+    assert confirmed.json()["embed_model_id"] == "test/embed"
 
 
 def test_delete_machine_cascades(client):

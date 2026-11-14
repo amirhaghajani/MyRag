@@ -41,13 +41,18 @@ async function request(path, options = {}) {
 
   if (!response.ok) {
     let detail = response.statusText;
+    let payload = null;
     try {
-      const body = await response.json();
-      detail = body.detail || JSON.stringify(body);
+      payload = await response.json();
+      detail = payload.detail ?? JSON.stringify(payload);
     } catch {
       /* non-JSON error body */
     }
-    throw new Error(detail);
+    if (typeof detail !== "string") detail = JSON.stringify(detail);
+    const error = new Error(detail);
+    error.status = response.status;
+    error.payload = payload;
+    throw error;
   }
 
   if (response.status === 204) return null;
@@ -71,6 +76,8 @@ export const api = {
   createMachine: (payload) =>
     request("/machines", { method: "POST", body: JSON.stringify(payload) }),
   getMachine: (id) => request(`/machines/${id}`),
+  updateMachine: (id, payload) =>
+    request(`/machines/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteMachine: (id) => request(`/machines/${id}`, { method: "DELETE" }),
 
   listDocuments: (machineId) => request(`/machines/${machineId}/documents`),

@@ -1,11 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api.js";
+import { confirmReembed, embedIsStale } from "../reembed.js";
 
-export default function UploadPanel({ machineId, onChanged }) {
+export default function UploadPanel({ machine, models, onChanged, onMachineUpdated }) {
+  const machineId = machine?.id;
   const [documents, setDocuments] = useState([]);
   const [busy, setBusy] = useState(false);
   const [retrying, setRetrying] = useState(null);
   const [error, setError] = useState("");
+
+  const stale = embedIsStale(machine, models);
 
   async function refresh() {
     if (!machineId) return;
@@ -26,12 +30,22 @@ export default function UploadPanel({ machineId, onChanged }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [indexing, machineId]);
 
+  async function ensureEmbedReady() {
+    if (!stale) return true;
+    const updated = await confirmReembed(machine, models);
+    if (!updated) return false;
+    onMachineUpdated?.(updated);
+    await onChanged?.();
+    return true;
+  }
+
   async function upload(event) {
     const file = event.target.files?.[0];
     if (!file) return;
     setBusy(true);
     setError("");
     try {
+      if (!(await ensureEmbedReady())) return;
       const doc = await api.uploadDocument(machineId, file);
       await api.indexDocument(doc.id);
       await refresh();
@@ -54,6 +68,7 @@ export default function UploadPanel({ machineId, onChanged }) {
     setRetrying(doc.id);
     setError("");
     try {
+      if (!(await ensureEmbedReady())) return;
       await api.indexDocument(doc.id);
       await refresh();
       onChanged();
@@ -76,6 +91,13 @@ export default function UploadPanel({ machineId, onChanged }) {
         />
         {busy && <span className="muted">Uploading and indexing…</span>}
       </div>
+      {stale && (
+        <div className="error" style={{ marginTop: 8 }}>
+          This machine still uses “{machine?.embed_model_id}” (dim {machine?.embed_dim}), which
+          the server no longer has. You will be asked to re-embed its documents with{" "}
+          {models?.default_embed_model} before uploading.
+        </div>
+      )}
       {error && <div className="error">{error}</div>}
 
       {documents.length > 0 && (

@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from sqlalchemy import text
 
+from ..config import get_settings
 from ..db import session_scope
 from ..ingest.pipeline import index_document, set_status
 from ..ingest.reader import UnsupportedFileError, validate_upload
@@ -49,6 +50,32 @@ def _to_out(row) -> DocumentOut:
     )
 
 
+def _ensure_embed_compatible(machine) -> None:
+    """Block uploads/indexing when the machine's embed model is out of date."""
+    settings = get_settings()
+    embed_dim = int(machine["embed_dim"])
+    model_id = machine["embed_model_id"]
+
+    if embed_dim != settings.embed_dim:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"This machine embeds with dim {embed_dim}, but the server is configured "
+                f"for dim {settings.embed_dim}. Pick a matching embed model in machine "
+                "settings and re-embed its documents before uploading more."
+            ),
+        )
+    if model_id not in settings.embed_prices:
+        known = ", ".join(sorted(settings.embed_prices))
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Embed model '{model_id}' is no longer configured. Configured: {known}. "
+                "Change the machine's embed model and re-embed its documents."
+            ),
+        )
+
+
 @router.post("/api/machines/{machine_id}/documents", response_model=DocumentOut, status_code=201)
 async def upload_document(
     machine_id: int,
@@ -58,10 +85,12 @@ async def upload_document(
     re-index without re-uploading."""
     with session_scope() as session:
         machine = session.execute(
-            text("SELECT id, embed_model_id FROM machines WHERE id = :id"), {"id": machine_id}
+            text("SELECT id, embed_model_id, embed_dim FROM machines WHERE id = :id"),
+            {"id": machine_id},
         ).mappings().first()
     if machine is None:
         raise HTTPException(status_code=404, detail=f"Machine {machine_id} not found")
+    _ensure_embed_compatible(machine)
 
     filename = Path(file.filename or "").name
     if not filename:
@@ -131,6 +160,16 @@ def start_indexing(document_id: int, background_tasks: BackgroundTasks) -> dict:
 
     if row is None:
         raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+    with session_scope() as session:
+        machine = session.execute(
+            text("SELECT embed_model_id, embed_dim FROM machines WHERE id = :id"),
+            {"id": int(row["machine_id"])},
+        ).mappings().first()
+    if machine is None:
+        raise HTTPException(status_code=404, detail=f"Machine {row['machine_id']} not found")
+    _ensure_embed_compatible(machine)
+
     if row["status"] == "indexing":
         raise HTTPException(status_code=409, detail="Document is already being indexed.")
     if not row["stored_path"]:
