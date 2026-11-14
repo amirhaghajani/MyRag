@@ -25,13 +25,14 @@ function rejectUnauthorized() {
 
 async function request(path, options = {}) {
   const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const { headers: extraHeaders, ...rest } = options;
   const response = await fetch(`${BASE}${path}`, {
+    ...rest,
     headers: {
       ...(isForm ? {} : { "Content-Type": "application/json" }),
       ...getAuthHeader(),
-      ...(options.headers || {}),
+      ...(extraHeaders || {}),
     },
-    ...options,
   });
 
   if (response.status === 401) {
