@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from .api import auth_api, chat, documents, machines, models_api, usage, workflows_api
@@ -108,6 +110,12 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     def health() -> dict:
         return {"status": "ok"}
+
+    # Serve the built SPA when it exists (npm run build in web/). Mounted last so
+    # every /api route above wins.
+    dist = Path(__file__).resolve().parent.parent / "web" / "dist"
+    if dist.is_dir():
+        app.mount("/", StaticFiles(directory=dist, html=True), name="web")
 
     return app
 

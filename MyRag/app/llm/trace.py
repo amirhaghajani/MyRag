@@ -34,7 +34,7 @@ def record(kind: str, payload: dict) -> None:
                     "payload": json.dumps(payload, ensure_ascii=False),
                 },
             )
-    except Exception:  # noqa: BLE001 - tracing must never break a query
+    except Exception:
         logger.warning("Could not record %s trace for query %s", kind, query_id, exc_info=True)
 
 

@@ -68,6 +68,254 @@ npm run dev
 
 Open http://localhost:5173. The Vite dev server proxies `/api` to the backend on port 8000.
 
+## Deploy on Windows
+
+A production run is one process: FastAPI serves the API and the built SPA (`web/dist`) from the same
+port. Build the frontend once, then run Uvicorn without `--reload`.
+
+### 1. PostgreSQL with pgvector
+
+Easiest on Windows is Docker Desktop:
+
+```powershell
+docker run -d --name myrag-pg `
+  -e POSTGRES_PASSWORD=postgres `
+  -e POSTGRES_DB=myragapp `
+  -p 5432:5432 `
+  -v myragpg:/var/lib/postgresql/data `
+  pgvector/pgvector:pg16
+```
+
+Then allow the extension (once, as a superuser):
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+With a native PostgreSQL install, install pgvector for your server version and put its `dll/`
+files on `PATH` before starting the service; the app checks the extension at startup and refuses to
+run without it.
+
+### 2. Build the frontend
+
+```powershell
+cd C:\l\llamaindex\MyRag\web
+npm install
+npm run build
+```
+
+This produces `web/dist`, which `app/main.py` mounts automatically when present. Rebuild after any
+UI change.
+
+### 3. Configure and start
+
+Edit `.env` for the server (not localhost-only values unless it is local):
+
+- `DATABASE_URL` — reachable Postgres URL.
+- `AUTH_USERNAME` / `AUTH_PASSWORD` — required unless you are exposing it on a trusted network.
+- `API_BASE`, `EMBED_API_BASE` — the LLM/embedding hosts. If Ollama runs on another machine, use its
+  LAN address and set `OLLAMA_ORIGINS` there.
+- `HOST=0.0.0.0` to accept connections from other machines.
+
+Run it:
+
+```powershell
+cd C:\l\llamaindex\MyRag
+.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Open http://SERVER-IP:8000. Allow the port through Windows Firewall:
+
+```powershell
+New-NetFirewallRule -DisplayName "MyRag 8000" -Direction Inbound `
+  -Protocol TCP -LocalPort 8000 -Action Allow
+```
+
+### 4. Run it as a Windows service (optional)
+
+[NSSM](https://nssm.cc/) wraps any executable as a service:
+
+```powershell
+nssm install MyRag "C:\l\llamaindex\MyRag\.venv\Scripts\python.exe" `
+  "-m uvicorn app.main:app --host 0.0.0.0 --port 8000"
+nssm set MyRag AppDirectory "C:\l\llamaindex\MyRag"
+nssm set MyRag Start SERVICE_AUTO_START
+nssm start MyRag
+```
+
+Uvicorn workers are not supported on Windows, so run a single process. If you need more throughput,
+put IIS (with the URL Rewrite + ARR modules) or nginx for Windows in front and forward to several
+Uvicorn instances on different ports.
+
+## Put nginx for Windows in front of Uvicorn (recommended)
+
+nginx handles Server-Sent Events correctly (`proxy_buffering off`) and terminates TLS, so Uvicorn
+stays on loopback. `deploy/nginx.conf` is a ready-made config for
+`https://myrag.myorganization.ir`.
+
+### 1. Install nginx
+
+Download the stable Windows build from nginx.org, unzip it to `C:\nginx` (keep `nginx.exe` at
+`C:\nginx\nginx.exe`), and put certificates in `C:\nginx\certs\`.
+
+### 2. DNS and firewall
+
+- Create an `A` record: `myrag.myorganization.ir` → the server's public IP (or the internal IP if it
+  is only reachable inside the organization).
+- Open inbound TCP 80 and 443:
+
+```powershell
+New-NetFirewallRule -DisplayName "MyRag HTTP" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow
+New-NetFirewallRule -DisplayName "MyRag HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow
+```
+
+Port 80 must be reachable from the internet only if you use Let's Encrypt HTTP-01 validation.
+
+### 3. Certificate
+
+If you already have a PFX (from the organization CA or a commercial CA), convert it to PEM with
+OpenSSL (Git for Windows ships one):
+
+```powershell
+openssl pkcs12 -in myrag.pfx -clcerts -nokeys -out C:\nginx\certs\myrag.myorganization.ir.crt
+openssl pkcs12 -in myrag.pfx -nocerts -nodes  -out C:\nginx\certs\myrag.myorganization.ir.key
+```
+
+For Let's Encrypt, use [win-acme](https://www.win-acme.com) and write PEM files straight to nginx:
+
+```powershell
+.\wacs.exe --host myrag.myorganization.ir --store pemfiles `
+  --pemfilespath C:\nginx\certs --installation none --accepttos --email admin@myorganization.ir
+```
+
+Then renew with a reload hook (`--script "C:\nginx\nginx.exe -p C:\nginx -s reload"`).
+
+### 4. Configure and test
+
+```powershell
+Copy-Item deploy\nginx.conf C:\nginx\conf\nginx.conf
+C:\nginx\nginx.exe -p C:\nginx -t
+```
+
+Adjust `server_name` and the certificate paths if your hostname or file names differ.
+
+### 5. Run Uvicorn on loopback
+
+```powershell
+cd C:\l\llamaindex\MyRag
+.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Do **not** open port 8000 in the firewall — nginx is the only public entry point.
+
+### 6. Run both as Windows services
+
+nginx for Windows has no service mode; use [NSSM](https://nssm.cc/) for both:
+
+```powershell
+nssm install MyRag "C:\l\llamaindex\MyRag\.venv\Scripts\python.exe" `
+  "-m uvicorn app.main:app --host 127.0.0.1 --port 8000"
+nssm set MyRag AppDirectory "C:\l\llamaindex\MyRag"
+nssm set MyRag Start SERVICE_AUTO_START
+nssm start MyRag
+
+nssm install MyRagNginx "C:\nginx\nginx.exe"
+nssm set MyRagNginx AppDirectory "C:\nginx"
+nssm set MyRagNginx Start SERVICE_AUTO_START
+nssm start MyRagNginx
+```
+
+After a config change: `C:\nginx\nginx.exe -p C:\nginx -s reload`.
+
+### 7. Verify streaming
+
+```powershell
+curl.exe -N -X POST https://myrag.myorganization.ir/api/machines/2/chat/stream `
+  -H "Content-Type: application/json" `
+  -d '{"question":"What is this document about?","workflow_id":1,"llm_model_id":"deepseek-r1:14b"}'
+```
+
+`data:` lines must appear one by one. If they arrive all at once, check that `proxy_buffering off;` is
+still present in the `location /` block.
+
+### 8. More throughput
+
+Uvicorn workers do not work on Windows. Run two or three instances on ports 8000-8002 (one NSSM
+service each) and list them in the `upstream` block in `deploy/nginx.conf`. All state lives in
+Postgres, so any instance can serve any request.
+
+## Put IIS in front of Uvicorn (optional)
+
+Use IIS as the public site and keep Uvicorn on loopback. `deploy/web.config` is a ready-made
+reverse-proxy config: it forwards every request to `http://127.0.0.1:8000` and disables dynamic
+compression so streamed answers are not buffered.
+
+1. Enable **Internet Information Services** + **IIS Management Console** in Windows Features, then
+   install **URL Rewrite 2.1** and **Application Request Routing (ARR) 3.0** (x64) from iis.net.
+   ARR requires URL Rewrite.
+
+2. Create the site folder and copy the config:
+
+```powershell
+New-Item -ItemType Directory C:\inetpub\myrag
+Copy-Item deploy\web.config C:\inetpub\myrag\web.config
+```
+
+3. Create the site (no managed code, ARR proxies to Uvicorn):
+
+```powershell
+Import-Module WebAdministration
+New-WebAppPool -Name MyRag
+Set-ItemProperty IIS:\AppPools\MyRag managedRuntimeVersion ""
+New-WebSite -Name MyRag -PhysicalPath C:\inetpub\myrag -Port 80 -ApplicationPool MyRag
+```
+
+Stop the Default Web Site first if it already owns port 80, or use another port/host header.
+
+4. Bind Uvicorn to loopback only and open just 80/443 in the firewall:
+
+```powershell
+.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+5. Raise the ARR timeout: reasoning answers can take minutes. In IIS Manager select the server,
+   open **Server Proxy Settings** in the ARR pane, and set **Time-out (seconds)** to `300`.
+
+6. For HTTPS, add an `https` binding with your certificate. IIS terminates TLS and still proxies to
+   plain HTTP on 127.0.0.1:8000:
+
+```powershell
+New-WebBinding -Name MyRag -Protocol https -Port 443 -HostHeader myrag.local
+$cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object Subject -eq "CN=myrag.local"
+$cert | New-Item -Path "IIS:\SslBindings!443!myrag.local"
+```
+
+7. Verify that tokens actually stream through IIS (they must appear one by one, not in one burst):
+
+```powershell
+curl.exe -N -X POST http://localhost/api/machines/2/chat/stream `
+  -H "Content-Type: application/json" `
+  -d '{"question":"What is this document about?","workflow_id":1,"llm_model_id":"deepseek-r1:14b"}'
+```
+
+If the `data:` lines only arrive at the end, something is still buffering: confirm
+`doDynamicCompression="false"` in `web.config` and that ARR is installed. nginx for Windows
+(`proxy_buffering off;`) is the fallback.
+
+8. To use several cores, run Uvicorn on ports 8000-8002 and point an ARR server farm at them,
+   rewriting to `http://myragfarm/{R:0}`. All state is in Postgres, so any instance can serve any
+   request.
+
+The app's own login (`AUTH_USERNAME` / `AUTH_PASSWORD`) still applies — IIS only forwards requests.
+If you switch to IIS/Windows authentication instead, clear those two `.env` values.
+
+### 5. Data to back up
+
+- The Postgres database (`pg_dump`).
+- `data/uploads/` — the original files; re-indexing needs them.
+
+The `.env` file is git-ignored and never part of the repository.
+
 ## Retrieval flows
 
 Each flow is a class in `app/retrieval/`, registered in `registry.py`, and seeded as a row in the

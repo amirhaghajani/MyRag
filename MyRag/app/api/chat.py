@@ -126,7 +126,7 @@ async def chat_stream(machine_id: int, payload: ChatRequest) -> StreamingRespons
                 top_k=top_k,
             ):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-        except Exception as exc:  # noqa: BLE001 - surfaced in the stream
+        except Exception as exc:
             logger.exception("Streaming chat failed for machine %s", machine_id)
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
 

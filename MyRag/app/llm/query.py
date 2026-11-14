@@ -344,7 +344,7 @@ async def stream_query(
             "total_ms": outcome.total_ms,
             "retrieved_chunk_ids": outcome.retrieved_chunk_ids,
         }
-    except Exception as exc:  # noqa: BLE001 - reported to the client, not swallowed
+    except Exception as exc:
         handler.drain()
         total_ms = int((time.perf_counter() - started) * 1000)
         logger.warning("Streaming query %s failed: %s", query_id, exc, exc_info=True)
