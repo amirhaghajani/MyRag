@@ -13,6 +13,9 @@ from .config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# pgvector HNSW/IVFFlat indexes support at most 2000 dimensions for the vector type.
+HNSW_MAX_DIM = 2000
+
 _engine = None
 _session_factory = None
 
@@ -95,17 +98,27 @@ def existing_vector_dims(conn) -> dict[int, str]:
 
 
 def ensure_vector_column(conn, dim: int) -> str:
-    """Add the vector_<dim> column and its HNSW index when missing."""
+    """Add the vector_<dim> column and, when possible, its HNSW index."""
+    dim = int(dim)
     column = vector_column(dim)
-    conn.execute(
-        text(f"ALTER TABLE chunks ADD COLUMN IF NOT EXISTS {column} vector({int(dim)})")
-    )
-    conn.execute(
-        text(
-            f"CREATE INDEX IF NOT EXISTS chunks_{column}_hnsw_idx "
-            f"ON chunks USING hnsw ({column} vector_cosine_ops)"
+    conn.execute(text(f"ALTER TABLE chunks ADD COLUMN IF NOT EXISTS {column} vector({dim})"))
+
+    if dim <= HNSW_MAX_DIM:
+        conn.execute(
+            text(
+                f"CREATE INDEX IF NOT EXISTS chunks_{column}_hnsw_idx "
+                f"ON chunks USING hnsw ({column} vector_cosine_ops)"
+            )
         )
-    )
+    else:
+        # pgvector cannot index more than 2000 vector dimensions with HNSW. The
+        # column still works; searches fall back to an exact scan.
+        logger.warning(
+            "Skipping HNSW index for %s: pgvector supports at most %d dimensions; "
+            "vector search will use an exact scan.",
+            column,
+            HNSW_MAX_DIM,
+        )
     return column
 
 

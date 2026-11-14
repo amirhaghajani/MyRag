@@ -172,6 +172,10 @@ and re-indexes its documents from the stored files.
 **Legacy `EMBED_DIM`** is ignored; machines take their dimension from their model. The old single
 `chunks.vector` column is left in place and unused, so existing rows are harmless.
 
+**Dimensions above 2000:** pgvector cannot build HNSW/IVFFlat indexes for more than 2000 `vector`
+dimensions. The column is created without an index and cosine search falls back to an exact scan;
+correct results, slower on large corpora. Use a ≤2000-dim model if you need indexed search.
+
 ### When a machine's embed model disappears
 
 If a machine was created with a model that is no longer in `EMBED_MODELS`, the UI detects it: uploading
