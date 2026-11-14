@@ -16,9 +16,10 @@ export default function MachineEmbedSettings({ machine, models, onChanged }) {
 
 const modelMissing = !configured.some((m) => m.id === machine.embed_model_id);
   const current = configured.find((m) => m.id === machine.embed_model_id);
+  const selected = configured.find((m) => m.id === modelId);
 
   async function apply() {
-    if (!modelId || modelId === machine.embed_model_id || !selectionMatches) return;
+    if (!modelId || modelId === machine.embed_model_id) return;
     const reembed = machine.chunk_count > 0;
     const question = reembed
       ? `Re-embed all ${machine.chunk_count} chunks of "${machine.title}" with ${modelId}?\n\nThis calls the embedding API again and may cost money.`
