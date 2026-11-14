@@ -15,6 +15,7 @@ from llama_index.core.llms import ChatMessage, MessageRole
 from llama_index.core.workflow import Event, StartEvent, StopEvent, Workflow, step
 
 from ..llm.factory import build_llm
+from ..llm.trace import record_prompt, record_retrieval
 from ..retrieval import registry
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,7 @@ class RagWorkflow(Workflow):
         )
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         logger.debug("retrieval returned %d chunks in %dms", len(chunks), elapsed_ms)
+        record_retrieval(chunks)
         return RetrievedEvent(
             question=question,
             chunks=chunks,
@@ -115,7 +117,9 @@ class RagWorkflow(Workflow):
     @step
     async def synthesize(self, ev: RetrievedEvent) -> StopEvent:
         llm = build_llm(ev.llm_model_id)
-        response = await llm.achat(build_messages(ev.question, ev.chunks))
+        messages = build_messages(ev.question, ev.chunks)
+        record_prompt(messages)
+        response = await llm.achat(messages)
         return StopEvent(
             result={
                 "answer": response.message.content or "",

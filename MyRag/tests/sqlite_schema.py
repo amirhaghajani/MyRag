@@ -97,6 +97,15 @@ TABLES = [
     )
     """,
     """
+    CREATE TABLE query_event (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        query_id INTEGER,
+        kind TEXT,
+        payload TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
     CREATE TABLE ingest_usage (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         machine_id INTEGER,

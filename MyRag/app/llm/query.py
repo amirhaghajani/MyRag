@@ -13,6 +13,7 @@ from sqlalchemy import text
 from ..db import session_scope
 from ..llm import usage as usage_mod
 from ..llm.factory import build_llm
+from ..llm.trace import record_prompt, record_retrieval
 from ..retrieval import registry
 from ..workflows.rag_workflow import RagWorkflow, build_messages
 
@@ -288,10 +289,13 @@ async def stream_query(
             embed_model_id=embed_model_id,
         )
         retrieval_ms = int((time.perf_counter() - retrieval_started) * 1000)
+        record_retrieval(chunks)
 
         llm = build_llm(llm_model_id)
+        messages = build_messages(question, chunks)
+        record_prompt(messages)
         stream = await llm.astream_chat(
-            build_messages(question, chunks),
+            messages,
             stream_options={"include_usage": True},
         )
 

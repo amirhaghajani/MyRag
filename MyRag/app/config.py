@@ -104,6 +104,10 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
 
+    # Simple HTTP Basic auth. Auth is active only when both are set.
+    auth_username: str = ""
+    auth_password: str = ""
+
     @field_validator("embed_dim")
     @classmethod
     def _positive_dim(cls, value: int) -> int:
@@ -134,6 +138,10 @@ class Settings(BaseSettings):
             )
 
     def validate_models(self) -> None:
+        if (self.auth_username == "") != (self.auth_password == ""):
+            raise SettingsError(
+                "AUTH_USERNAME and AUTH_PASSWORD must be set together (both or neither)."
+            )
         if not self.api_base:
             raise SettingsError("API_BASE is required for the LLM endpoint.")
         if not self.llm_prices:
@@ -149,6 +157,11 @@ class Settings(BaseSettings):
                 f"DEFAULT_EMBED_MODEL='{self.default_embed_model}' is not in EMBED_MODELS."
             )
         self.validate_embed_dims()
+
+    @property
+    def auth_enabled(self) -> bool:
+        """Auth is active only when both credentials are configured."""
+        return bool(self.auth_username and self.auth_password)
 
     @property
     def embed_api_base_effective(self) -> str:

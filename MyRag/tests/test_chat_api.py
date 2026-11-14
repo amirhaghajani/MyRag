@@ -143,6 +143,39 @@ def test_chat_returns_answer_and_cost(client):
     assert body["llm_calls"][0]["purpose"] == "synthesize"
 
 
+def test_query_log_returns_retrieval_and_prompt(client):
+    machine_id, _ = _make_machine_with_doc(client)
+    workflow_id = _keyword_workflow_id(client)
+
+    body = client.post(
+        f"/api/machines/{machine_id}/chat",
+        json={
+            "question": "What is the rated capacity?",
+            "workflow_id": workflow_id,
+            "llm_model_id": "test/model",
+        },
+    ).json()
+
+    response = client.get(f"/api/queries/{body['query_id']}/log")
+    assert response.status_code == 200, response.text
+    events = response.json()["events"]
+    kinds = [event["kind"] for event in events]
+    assert kinds == ["retrieval", "prompt"]
+
+    retrieval = events[0]["payload"]
+    assert retrieval["chunks"]
+    assert retrieval["chunks"][0]["text"]
+    assert "filename" in retrieval["chunks"][0]
+
+    prompt = events[1]["payload"]
+    assert prompt["messages"][0]["role"] == "system"
+    assert "Documentation:" in prompt["messages"][-1]["content"]
+
+
+def test_query_log_missing_query_returns_404(client):
+    assert client.get("/api/queries/999999/log").status_code == 404
+
+
 def test_chat_persists_query_and_records_version(client):
     machine_id, _ = _make_machine_with_doc(client)
     workflow_id = _keyword_workflow_id(client)

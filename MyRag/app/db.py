@@ -254,6 +254,17 @@ def _build_metadata(vector_type):
     )
 
     Table(
+        "query_event",
+        metadata,
+        Column("id", BigInteger, primary_key=True, autoincrement=True),
+        Column("query_id", BigInteger, nullable=False),
+        Column("kind", Text, nullable=False),
+        Column("payload", Text, nullable=False),
+        Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False),
+        Index("ix_query_event_query", "query_id"),
+    )
+
+    Table(
         "ingest_usage",
         metadata,
         Column("id", BigInteger, primary_key=True, autoincrement=True),

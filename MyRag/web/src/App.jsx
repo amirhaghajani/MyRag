@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { api } from "./api.js";
+import Login from "./components/Login.jsx";
 import MachineCreate from "./components/MachineCreate.jsx";
 import MachineList from "./components/MachineList.jsx";
 import UploadPanel from "./components/UploadPanel.jsx";
@@ -14,6 +15,27 @@ export default function App() {
   const [workflows, setWorkflows] = useState([]);
   const [workflowId, setWorkflowId] = useState(null);
   const [error, setError] = useState("");
+  const [auth, setAuth] = useState({ ready: false, enabled: false, authenticated: true });
+
+  useEffect(() => {
+    api
+      .authStatus()
+      .then((status) =>
+        setAuth({
+          ready: true,
+          enabled: status.enabled,
+          authenticated: status.authenticated,
+        })
+      )
+      .catch(() => setAuth({ ready: true, enabled: false, authenticated: true }));
+  }, []);
+
+  useEffect(() => {
+    const onUnauthorized = () =>
+      setAuth((prev) => ({ ...prev, authenticated: false }));
+    window.addEventListener("myrag:unauthorized", onUnauthorized);
+    return () => window.removeEventListener("myrag:unauthorized", onUnauthorized);
+  }, []);
 
   const loadMachines = useCallback(async () => {
     try {
@@ -24,6 +46,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!auth.ready || (auth.enabled && !auth.authenticated)) return;
     loadMachines();
     api.listModels().then(setModels).catch((e) => setError(e.message));
     api
@@ -33,16 +56,39 @@ export default function App() {
         if (rows.length) setWorkflowId(rows[0].id);
       })
       .catch((e) => setError(e.message));
-  }, [loadMachines]);
+  }, [loadMachines, auth.ready, auth.enabled, auth.authenticated]);
 
   function refreshAll() {
     loadMachines();
+  }
+
+  if (!auth.ready) {
+    return <p className="muted" style={{ padding: 24 }}>Loading…</p>;
+  }
+
+  if (auth.enabled && !auth.authenticated) {
+    return (
+      <Login
+        onSuccess={() => setAuth((prev) => ({ ...prev, authenticated: true }))}
+      />
+    );
   }
 
   return (
     <div className="layout">
       <aside className="sidebar">
         <h1>MyRag</h1>
+        {auth.enabled && (
+          <button
+            className="link"
+            onClick={() => {
+              api.logout();
+              setAuth((prev) => ({ ...prev, authenticated: false }));
+            }}
+          >
+            Sign out
+          </button>
+        )}
         {error && <div className="error" style={{ marginBottom: 10 }}>{error}</div>}
         <MachineCreate models={models} onCreated={refreshAll} />
         <h2>Machines</h2>

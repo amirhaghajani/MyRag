@@ -18,6 +18,7 @@ from ..schemas import ChatRequest, ChatResponse
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/machines", tags=["chat"])
+log_router = APIRouter(tags=["chat"])
 
 _CALLS_SQL = text(
     "SELECT * FROM query_llm_call WHERE query_id = :qid ORDER BY call_index"
@@ -134,6 +135,42 @@ async def chat_stream(machine_id: int, payload: ChatRequest) -> StreamingRespons
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@log_router.get("/api/queries/{query_id}/log")
+def query_log(query_id: int) -> dict:
+    """Retrieval and prompt trace recorded while the query ran."""
+    with session_scope() as session:
+        found = session.execute(
+            text("SELECT id FROM query WHERE id = :id"), {"id": query_id}
+        ).mappings().first()
+        if found is None:
+            raise HTTPException(status_code=404, detail=f"Query {query_id} not found")
+        rows = session.execute(
+            text(
+                "SELECT kind, payload, created_at FROM query_event "
+                "WHERE query_id = :id ORDER BY id"
+            ),
+            {"id": query_id},
+        ).mappings().all()
+
+    events = []
+    for row in rows:
+        payload = row["payload"]
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                payload = {"raw": payload}
+        events.append(
+            {
+                "kind": row["kind"],
+                "payload": payload or {},
+                "created_at": row["created_at"],
+            }
+        )
+
+    return {"query_id": query_id, "events": events}
 
 
 @router.get("/{machine_id}/messages")

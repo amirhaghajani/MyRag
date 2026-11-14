@@ -61,6 +61,19 @@ def sqlite_engine(monkeypatch):
         conn.execute(
             text(
                 """
+                CREATE TABLE query_event (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    query_id INTEGER,
+                    kind TEXT,
+                    payload TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
                 CREATE TABLE query_llm_call (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     query_id INTEGER,

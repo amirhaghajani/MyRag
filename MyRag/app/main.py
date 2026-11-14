@@ -9,7 +9,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from .api import chat, documents, machines, models_api, usage, workflows_api
+from .api import auth_api, chat, documents, machines, models_api, usage, workflows_api
+from .auth import BasicAuthMiddleware
 from .config import SettingsError, get_settings
 from .db import create_schema, session_scope
 from .llm.instrumentation import install_usage_handler
@@ -86,6 +87,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    app.add_middleware(BasicAuthMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -94,6 +96,8 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    app.include_router(auth_api.router)
+    app.include_router(chat.log_router)
     app.include_router(machines.router)
     app.include_router(documents.router)
     app.include_router(workflows_api.router)

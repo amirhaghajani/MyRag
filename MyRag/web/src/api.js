@@ -1,10 +1,43 @@
 const BASE = "/api";
+const AUTH_KEY = "myrag.auth";
+
+export function getAuthHeader() {
+  try {
+    const token = sessionStorage.getItem(AUTH_KEY);
+    return token ? { Authorization: `Basic ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setAuth(username, password) {
+  sessionStorage.setItem(AUTH_KEY, btoa(`${username}:${password}`));
+}
+
+export function clearAuth() {
+  sessionStorage.removeItem(AUTH_KEY);
+}
+
+function rejectUnauthorized() {
+  clearAuth();
+  window.dispatchEvent(new Event("myrag:unauthorized"));
+}
 
 async function request(path, options = {}) {
+  const isForm = typeof FormData !== "undefined" && options.body instanceof FormData;
   const response = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: {
+      ...(isForm ? {} : { "Content-Type": "application/json" }),
+      ...getAuthHeader(),
+      ...(options.headers || {}),
+    },
     ...options,
   });
+
+  if (response.status === 401) {
+    rejectUnauthorized();
+    throw new Error("Login required");
+  }
 
   if (!response.ok) {
     let detail = response.statusText;
@@ -23,6 +56,17 @@ async function request(path, options = {}) {
 }
 
 export const api = {
+  authStatus: () => request("/auth/status"),
+  setAuth,
+  checkAuth: async (username, password) => {
+    const response = await fetch(`${BASE}/auth/status`, {
+      headers: { Authorization: `Basic ${btoa(`${username}:${password}`)}` },
+    });
+    const body = await response.json().catch(() => ({}));
+    return { ok: response.ok && Boolean(body.authenticated), body };
+  },
+  logout: () => clearAuth(),
+
   listMachines: () => request("/machines"),
   createMachine: (payload) =>
     request("/machines", { method: "POST", body: JSON.stringify(payload) }),
@@ -56,9 +100,16 @@ export const api = {
   chatStream: async (machineId, payload, onEvent) => {
     const response = await fetch(`${BASE}/machines/${machineId}/chat/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
       body: JSON.stringify(payload),
     });
+    if (response.status === 401) {
+      rejectUnauthorized();
+      throw new Error("Login required");
+    }
     if (!response.ok) {
       let detail = response.statusText;
       try {
@@ -91,6 +142,7 @@ export const api = {
     return null;
   },
   listMessages: (machineId) => request(`/machines/${machineId}/messages`),
+  queryLog: (queryId) => request(`/queries/${queryId}/log`),
 
   usage: (machineId) => request(`/machines/${machineId}/usage`),
   compareWorkflows: (machineId) => request(`/usage/compare?machine_id=${machineId}`),

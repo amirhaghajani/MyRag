@@ -13,6 +13,7 @@ export default function ChatPanel({
   const [messages, setMessages] = useState([]);
   const [busy, setBusy] = useState(false);
   const [stream, setStream] = useState(null);
+  const [trace, setTrace] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -69,6 +70,21 @@ export default function ChatPanel({
       setStream(null);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function toggleLog(message) {
+    const id = message.query_id;
+    if (trace && trace.queryId === id) {
+      setTrace(null);
+      return;
+    }
+    setTrace({ queryId: id, loading: true, error: "", events: null });
+    try {
+      const data = await api.queryLog(id);
+      setTrace({ queryId: id, loading: false, error: "", events: data.events || [] });
+    } catch (err) {
+      setTrace({ queryId: id, loading: false, error: err.message, events: null });
     }
   }
 
@@ -156,6 +172,50 @@ export default function ChatPanel({
                 ? ` · chunks ${m.retrieved_chunk_ids.join(", ")}`
                 : ""}
             </div>
+            <div className="cost">
+              <button className="link" onClick={() => toggleLog(m)}>
+                {trace?.queryId === m.query_id ? "Hide log" : "Show log"}
+              </button>
+            </div>
+            {trace?.queryId === m.query_id && (
+              <div className="trace">
+                {trace.loading && <p className="muted">Loading log…</p>}
+                {trace.error && <div className="error">{trace.error}</div>}
+                {trace.events?.map((event, i) =>
+                  event.kind === "retrieval" ? (
+                    <div className="trace-block" key={`retrieval-${i}`}>
+                      <h4>Retrieved data ({event.payload.chunks?.length || 0} chunks)</h4>
+                      {event.payload.chunks?.length ? (
+                        event.payload.chunks.map((chunk) => (
+                          <details key={chunk.chunk_id}>
+                            <summary>
+                              #{chunk.rank + 1} · chunk {chunk.chunk_id} ·{" "}
+                              {chunk.filename || "document"} · score {chunk.score}
+                            </summary>
+                            <pre>{chunk.text}</pre>
+                          </details>
+                        ))
+                      ) : (
+                        <p className="muted">No chunks retrieved.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="trace-block" key={`prompt-${i}`}>
+                      <h4>Last LLM prompt</h4>
+                      {event.payload.messages?.map((msg, j) => (
+                        <div className="trace-msg" key={j}>
+                          <span className="muted">{msg.role}</span>
+                          <pre>{msg.content}</pre>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                )}
+                {trace.events?.length === 0 && (
+                  <p className="muted">No log recorded for this query.</p>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
