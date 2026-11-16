@@ -1,0 +1,13 @@
+Once initialized, a chat engine can be queried using various methods:
+chat(): This method initiates a synchronous chat session, processing the user's
+message and returning the response immediately.
+achat(): This method is similar to chat() but executes the query asynchronously,
+allowing multiple requests to be processed simultaneously. This can be useful, for
+example, in a web or mobile application where we want to avoid blocking the main
+thread during server queries.
+stream_chat(): This method opens a streaming chat session, where responses can be
+returned as they are generated, for more dynamic interaction. This is particularly useful
+for long or complex responses that require significant processing time, allowing the
+user to start seeing parts of the response before all processing is complete.
+astream_chat(): This idx_d125dde7method is an asynchronous version of stream_chat() that
+allows us to handle streaming interactions in an asynchronous context.
